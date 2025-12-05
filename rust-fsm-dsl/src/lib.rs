@@ -6,8 +6,8 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use std::{collections::BTreeSet, iter::FromIterator};
-use syn::{parse_macro_input, Attribute, Ident};
+use std::{collections::BTreeMap, collections::BTreeSet, iter::FromIterator};
+use syn::{parse_macro_input, punctuated::Punctuated, Attribute, Ident, Type};
 
 mod parser;
 
@@ -15,7 +15,7 @@ mod parser;
 /// represantion of the simple and the compact forms.
 struct Transition<'a> {
     initial_state: &'a Ident,
-    input_value: &'a Ident,
+    input_value: &'a parser::InputVariant,
     final_state: &'a Ident,
     output: &'a Option<Ident>,
 }
@@ -54,7 +54,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     });
 
     let mut states = BTreeSet::new();
-    let mut inputs = BTreeSet::new();
+    let mut inputs: BTreeMap<&Ident, Option<&Punctuated<Type, syn::Token![,]>>> = BTreeMap::new();
     let mut outputs = BTreeSet::new();
     let mut transition_cases = Vec::new();
     let mut output_cases = Vec::new();
@@ -67,6 +67,9 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
 
     states.insert(&input.initial_state);
 
+    // Check if we're using a custom input type
+    let using_custom_input = input.input_type.is_some();
+
     for transition in transitions {
         let Transition {
             initial_state,
@@ -75,20 +78,34 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             output,
         } = transition;
 
+        let input_name = &input_value.name;
+
         #[cfg(feature = "diagram")]
         mermaid_diagram.push_str(&format!(
-            "///    {initial_state} --> {final_state}: {input_value}"
+            "///    {initial_state} --> {final_state}: {input_name}"
         ));
 
+        // Generate match cases
+        // For generated input types, we know exactly which pattern to use based on the DSL
+        // For custom input types, we only support unit variants (without tuple fields)
+        let input_pattern = if using_custom_input || input_value.fields.is_none() {
+            // For custom types, only support unit variant patterns
+            // Tuple variants are not supported with custom input types
+            quote! { Self::Input::#input_name }
+        } else {
+            // For generated tuple variants, use the (..) pattern
+            quote! { Self::Input::#input_name(..) }
+        };
+
         transition_cases.push(quote! {
-            (Self::State::#initial_state, Self::Input::#input_value) => {
+            (Self::State::#initial_state, #input_pattern) => {
                 Some(Self::State::#final_state)
             }
         });
 
         if let Some(output_value) = output {
             output_cases.push(quote! {
-                (Self::State::#initial_state, Self::Input::#input_value) => {
+                (Self::State::#initial_state, #input_pattern) => {
                     Some(Self::Output::#output_value)
                 }
             });
@@ -102,7 +119,12 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
 
         states.insert(initial_state);
         states.insert(final_state);
-        inputs.insert(input_value);
+
+        // Store input variant with its fields
+        inputs
+            .entry(input_name)
+            .or_insert(input_value.fields.as_ref());
+
         if let Some(ref output) = output {
             outputs.insert(output);
         }
@@ -115,6 +137,15 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
 
     let initial_state_name = &input.initial_state;
 
+    // Generate input variants with optional tuple fields
+    let input_variants = inputs.iter().map(|(name, fields)| {
+        if let Some(fields) = fields {
+            quote! { #name(#fields) }
+        } else {
+            quote! { #name }
+        }
+    });
+
     let (input_type, input_impl) = match input.input_type {
         Some(t) => (quote!(#t), quote!()),
         None => (
@@ -122,7 +153,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             quote! {
                 #attrs
                 pub enum Input {
-                    #(#inputs),*
+                    #(#input_variants),*
                 }
             },
         ),

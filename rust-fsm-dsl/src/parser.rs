@@ -1,8 +1,9 @@
 use syn::{
     braced, bracketed, parenthesized,
     parse::{Error, Parse, ParseStream, Result},
+    punctuated::Punctuated,
     token::{Bracket, Paren},
-    Attribute, Ident, Path, Token, Visibility,
+    Attribute, Ident, Path, Token, Type, Visibility,
 };
 
 /// The output of a state transition
@@ -26,17 +27,39 @@ impl From<Output> for Option<Ident> {
     }
 }
 
+/// Represents an input variant, which can be a simple identifier or a tuple variant
+pub struct InputVariant {
+    pub name: Ident,
+    pub fields: Option<Punctuated<Type, Token![,]>>,
+}
+
+impl Parse for InputVariant {
+    /// Parse the identifier and optionally tuple fields (for compact format)
+    fn parse(input: ParseStream) -> Result<Self> {
+        let name = input.parse()?;
+        let fields = if input.lookahead1().peek(Paren) {
+            let content;
+            parenthesized!(content in input);
+            Some(content.parse_terminated(Type::parse, Token![,])?)
+        } else {
+            None
+        };
+
+        Ok(Self { name, fields })
+    }
+}
+
 /// Represents a part of state transition without the initial state. The `Parse`
 /// trait is implemented for the compact form.
 pub struct TransitionEntry {
-    pub input_value: Ident,
+    pub input_value: InputVariant,
     pub final_state: Ident,
     pub output: Option<Ident>,
 }
 
 impl Parse for TransitionEntry {
     fn parse(input: ParseStream) -> Result<Self> {
-        let input_value = input.parse()?;
+        let input_value = InputVariant::parse(input)?;
         input.parse::<Token![=>]>()?;
         let final_state = input.parse()?;
         let output = input.parse::<Output>()?.into();
@@ -62,7 +85,7 @@ impl Parse for TransitionDef {
         let transitions = if input.lookahead1().peek(Paren) {
             let input_content;
             parenthesized!(input_content in input);
-            let input_value = input_content.parse()?;
+            let input_value = InputVariant::parse(&input_content)?;
             input.parse::<Token![=>]>()?;
             let final_state = input.parse()?;
             let output = input.parse::<Output>()?.into();
