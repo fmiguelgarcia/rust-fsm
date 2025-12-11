@@ -1,47 +1,105 @@
 use syn::{
     braced, bracketed, parenthesized,
     parse::{Error, Parse, ParseStream, Result},
+    punctuated::Punctuated,
     token::{Bracket, Paren},
-    Attribute, Ident, Path, Token, Visibility,
+    Attribute, Expr, Ident, ItemUse, Path, Token, Type, Visibility,
 };
 
 /// The output of a state transition
-pub struct Output(Option<Ident>);
+pub enum OutputSpec {
+    /// A constant output variant (e.g., [SetupTimer])
+    Constant(Ident),
+    /// A function call output (e.g., [|x| compute(x)])
+    Call(Expr),
+}
+
+pub struct Output(Option<OutputSpec>);
 
 impl Parse for Output {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.lookahead1().peek(Bracket) {
             let output_content;
             bracketed!(output_content in input);
-            Ok(Self(Some(output_content.parse()?)))
+
+            // Check if it starts with a closure (|)
+            if output_content.peek(Token![|]) {
+                // Parse as closure expression
+                let expr: Expr = output_content.parse()?;
+                return Ok(Self(Some(OutputSpec::Call(expr))));
+            }
+
+            // Parse as constant identifier
+            let ident: Ident = output_content.parse()?;
+            Ok(Self(Some(OutputSpec::Constant(ident))))
         } else {
             Ok(Self(None))
         }
     }
 }
 
-impl From<Output> for Option<Ident> {
+impl From<Output> for Option<OutputSpec> {
     fn from(output: Output) -> Self {
         output.0
     }
 }
 
+/// Represents an input variant, which can be a simple identifier or a tuple variant
+pub struct InputVariant {
+    pub name: Ident,
+    pub fields: Punctuated<Type, Token![,]>,
+}
+
+impl Parse for InputVariant {
+    /// Parse the identifier and optionally tuple fields (for compact format)
+    fn parse(input: ParseStream) -> Result<Self> {
+        let name = input.parse()?;
+        let fields = if input.lookahead1().peek(Paren) {
+            let content;
+            parenthesized!(content in input);
+            content.parse_terminated(Type::parse, Token![,])?
+        } else {
+            Punctuated::new()
+        };
+
+        Ok(Self { name, fields })
+    }
+}
+
+/// Represents a guard expression for a transition
+pub struct Guard {
+    pub expr: Expr,
+}
+
 /// Represents a part of state transition without the initial state. The `Parse`
 /// trait is implemented for the compact form.
 pub struct TransitionEntry {
-    pub input_value: Ident,
+    pub input_value: InputVariant,
+    pub guard: Option<Guard>,
     pub final_state: Ident,
-    pub output: Option<Ident>,
+    pub output: Option<OutputSpec>,
 }
 
 impl Parse for TransitionEntry {
     fn parse(input: ParseStream) -> Result<Self> {
-        let input_value = input.parse()?;
+        let input_value = InputVariant::parse(input)?;
+
+        // Check for optional guard: if <expr>
+        let guard = if input.peek(Token![if]) {
+            input.parse::<Token![if]>()?;
+            Some(Guard {
+                expr: input.parse()?,
+            })
+        } else {
+            None
+        };
+
         input.parse::<Token![=>]>()?;
         let final_state = input.parse()?;
         let output = input.parse::<Output>()?.into();
         Ok(Self {
             input_value,
+            guard,
             final_state,
             output,
         })
@@ -59,16 +117,18 @@ impl Parse for TransitionDef {
         let initial_state = input.parse()?;
         // Parse the transition in the simple format
         // InitialState(Input) => ResultState [Output]
+        // Note: Guards are not supported in simple format (only in compact format)
         let transitions = if input.lookahead1().peek(Paren) {
             let input_content;
             parenthesized!(input_content in input);
-            let input_value = input_content.parse()?;
+            let input_value = InputVariant::parse(&input_content)?;
             input.parse::<Token![=>]>()?;
             let final_state = input.parse()?;
             let output = input.parse::<Output>()?.into();
 
             vec![TransitionEntry {
                 input_value,
+                guard: None,
                 final_state,
                 output,
             }]
@@ -121,6 +181,7 @@ pub struct StateMachineDef {
     pub visibility: Visibility,
     pub name: Ident,
     pub initial_state: Ident,
+    pub use_statements: Vec<ItemUse>,
     pub transitions: Vec<TransitionDef>,
     pub attributes: Vec<Attribute>,
     pub input_type: Option<Path>,
@@ -176,6 +237,12 @@ impl Parse for StateMachineDef {
         parenthesized!(initial_state_content in input);
         let initial_state = initial_state_content.parse()?;
 
+        // Parse optional use statements
+        let mut use_statements = Vec::new();
+        while input.peek(Token![use]) {
+            use_statements.push(input.parse()?);
+        }
+
         let transitions = input
             .parse_terminated(TransitionDef::parse, Token![,])?
             .into_iter()
@@ -186,6 +253,7 @@ impl Parse for StateMachineDef {
             visibility,
             name,
             initial_state,
+            use_statements,
             transitions,
             attributes,
             input_type,

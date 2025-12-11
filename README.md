@@ -43,6 +43,10 @@ state machines:
 ### Non-default
 
 - `diagram` - generate Mermaid state diagrams in the doc strings. See below.
+- `pretty-print` - format guard expressions in diagrams using idiomatic Rust style
+  (requires `diagram` feature). When enabled, guard expressions are formatted with
+  `prettyplease` for better readability. Without this feature, a basic sanitization
+  is applied to make expressions safe for Mermaid.
 
 ## Usage in `no_std` environments
 
@@ -133,6 +137,91 @@ attributes (e.g. `derive`, `repr`) are applied to it.
 
 Within the `state_machine` macro you must define at least one state transition.
 
+#### Guards
+
+Guards allow you to conditionally control state transitions based on input data.
+They are particularly useful when your inputs are **tuple variants** carrying data,
+and you want different transitions based on that data.
+
+Guards are defined using the `if` keyword followed by a closure that takes a
+reference to the input data and returns a boolean:
+
+```rust
+use rust_fsm::*;
+
+state_machine! {
+    #[derive(Debug, PartialEq)]
+    turnstile(Locked)
+
+    Locked => {
+        Coin(u32) if |amount: &u32| *amount >= 50 => Unlocked,
+        Coin(u32) if |amount: &u32| *amount < 50 => Locked [RefundInsufficient],
+        Push => Locked [AccessDenied]
+    },
+    Unlocked => {
+        Push => Locked,
+        Coin(u32) => Unlocked [AlreadyUnlocked]
+    }
+}
+
+let mut machine = turnstile::StateMachine::new();
+
+// Insufficient coin - stays locked
+let res = machine.consume(&turnstile::Input::Coin(25));
+assert_eq!(res, Ok(Some(turnstile::Output::RefundInsufficient)));
+assert_eq!(machine.state(), &turnstile::State::Locked);
+
+// Sufficient coin - unlocks
+let res = machine.consume(&turnstile::Input::Coin(50));
+assert_eq!(machine.state(), &turnstile::State::Unlocked);
+```
+
+#### Dynamic outputs with closures
+
+In addition to static output variants, you can use closures to compute outputs
+dynamically based on input data. This is especially useful when working with
+tuple variant inputs that carry data.
+
+Closures are defined in the output section using the syntax `[|param1, param2| expression]`:
+
+```rust,ignore
+use rust_fsm::*;
+
+// Define a custom output type
+#[derive(Debug, PartialEq)]
+pub enum CalcOutput {
+    Result(i32),
+}
+
+state_machine! {
+    #[derive(Debug, PartialEq)]
+    #[state_machine(output(CalcOutput))]
+    calculator(Idle)
+
+    use super::CalcOutput;
+
+    Idle => {
+        Add(i32, i32) => Idle [|a: &i32, b: &i32| CalcOutput::Result(a + b)],
+        Multiply(i32, i32) => Idle [|x: &i32, y: &i32| CalcOutput::Result(x * y)],
+        Reset => Idle
+    }
+}
+
+let mut machine = calculator::StateMachine::new();
+
+// Addition: 5 + 3 = 8
+let result = machine.consume(&calculator::Input::Add(5, 3)).unwrap();
+assert_eq!(result, Some(CalcOutput::Result(8)));
+
+// Multiplication: 4 * 7 = 28
+let result = machine.consume(&calculator::Input::Multiply(4, 7)).unwrap();
+assert_eq!(result, Some(CalcOutput::Result(28)));
+```
+
+Note: When using closure-based outputs, you typically need to define a custom
+output type (using `#[state_machine(output(...))]`) and import it with a `use`
+statement inside the state machine definition.
+
 #### Visibility
 
 You can specify visibility like this:
@@ -198,6 +287,17 @@ state_machine! {
 controlled by the `diagram` feature, which is non-default. The diagrams are
 generated in the [Mermaid][mermaid] format. This feature includes the Mermaid
 script into the documentation page.
+
+The diagrams automatically represent:
+
+- **Nested states**: States with multiple self-loop transitions are shown
+  as composite states
+- **Choice states**: Guard conditions are represented using Mermaid's `<<choice>>`
+  notation
+- **Guard expressions**: When the `pretty-print` feature is enabled, guard
+  expressions are formatted using `prettyplease` for idiomatic Rust style.
+  Without this feature, a basic sanitization replaces special characters to
+  ensure `Mermaid` compatibility.
 
 To see this in action, download the repository and run:
 

@@ -271,7 +271,7 @@ pub struct StateMachine<T: StateMachineImpl> {
     state: T::State,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// An error type that represents that the state transition is impossible given
 /// the current combination of state and input.
 pub struct TransitionImpossibleError;

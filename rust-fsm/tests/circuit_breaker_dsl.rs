@@ -32,19 +32,19 @@ fn circit_breaker_dsl() {
     // Set up a timer
     let machine_wait = machine.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::new(5, 0));
+        std::thread::sleep(Duration::from_millis(500));
         let mut lock = machine_wait.lock().unwrap();
         let res = lock
             .consume(&circuit_breaker::Input::TimerTriggered)
             .unwrap();
-        assert!(matches!(res, None));
+        assert!(res.is_none());
         assert!(matches!(lock.state(), &circuit_breaker::State::HalfOpen));
     });
 
     // Try to pass a request when the circuit breaker is still open
     let machine_try = machine.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::new(1, 0));
+        std::thread::sleep(Duration::from_millis(100));
         let mut lock = machine_try.lock().unwrap();
         let res = lock.consume(&circuit_breaker::Input::Successful);
         assert!(matches!(res, Err(TransitionImpossibleError)));
@@ -52,11 +52,11 @@ fn circit_breaker_dsl() {
     });
 
     // Test if the circit breaker was actually closed
-    std::thread::sleep(Duration::new(7, 0));
+    std::thread::sleep(Duration::from_millis(700));
     {
         let mut lock = machine.lock().unwrap();
         let res = lock.consume(&circuit_breaker::Input::Successful).unwrap();
-        assert!(matches!(res, None));
+        assert!(res.is_none());
         assert!(matches!(lock.state(), &circuit_breaker::State::Closed));
     }
 }

@@ -6,18 +6,22 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use std::{collections::BTreeSet, iter::FromIterator};
-use syn::{parse_macro_input, Attribute, Ident};
+use std::{collections::BTreeMap, collections::BTreeSet, iter::FromIterator};
+use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, Attribute, Ident, Type};
 
 mod parser;
+
+#[cfg(feature = "diagram")]
+mod diagram;
 
 /// The full information about a state transition. Used to unify the
 /// represantion of the simple and the compact forms.
 struct Transition<'a> {
     initial_state: &'a Ident,
-    input_value: &'a Ident,
+    input_value: &'a parser::InputVariant,
+    guard: &'a Option<parser::Guard>,
     final_state: &'a Ident,
-    output: &'a Option<Ident>,
+    output: &'a Option<parser::OutputSpec>,
 }
 
 fn attrs_to_token_stream(attrs: Vec<Attribute>) -> proc_macro2::TokenStream {
@@ -44,76 +48,144 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     let fsm_name = input.name;
     let visibility = input.visibility;
 
-    let transitions = input.transitions.iter().flat_map(|def| {
-        def.transitions.iter().map(move |transition| Transition {
-            initial_state: &def.initial_state,
-            input_value: &transition.input_value,
-            final_state: &transition.final_state,
-            output: &transition.output,
+    // Collect all transitions first
+    let transitions = input
+        .transitions
+        .iter()
+        .flat_map(|def| {
+            def.transitions.iter().map(move |transition| Transition {
+                initial_state: &def.initial_state,
+                input_value: &transition.input_value,
+                guard: &transition.guard,
+                final_state: &transition.final_state,
+                output: &transition.output,
+            })
         })
-    });
+        .collect::<Vec<_>>();
 
     let mut states = BTreeSet::new();
-    let mut inputs = BTreeSet::new();
+    let mut inputs: BTreeMap<&Ident, &Punctuated<Type, Comma>> = BTreeMap::new();
     let mut outputs = BTreeSet::new();
     let mut transition_cases = Vec::new();
     let mut output_cases = Vec::new();
 
-    #[cfg(feature = "diagram")]
-    let mut mermaid_diagram = format!(
-        "///```mermaid\n///stateDiagram-v2\n///    [*] --> {}\n",
-        input.initial_state
-    );
-
     states.insert(&input.initial_state);
 
-    for transition in transitions {
+    // Check if we're using a custom input type
+    let using_custom_input = input.input_type.is_some();
+
+    for transition in &transitions {
         let Transition {
             initial_state,
             final_state,
             input_value,
+            guard,
             output,
         } = transition;
 
-        #[cfg(feature = "diagram")]
-        mermaid_diagram.push_str(&format!(
-            "///    {initial_state} --> {final_state}: {input_value}"
-        ));
+        let input_name = &input_value.name;
+
+        // Generate match cases
+        // For generated input types, we know exactly which pattern to use based on the DSL
+        // For custom input types, we only support unit variants (without tuple fields)
+
+        // When there's a guard with tuple variant, we need to bind the fields
+        let (input_pattern, guard_expr) = if let Some(guard) = guard {
+            let guard_expr = &guard.expr;
+            let param_names = input_param_names(input_value);
+
+            if param_names.is_empty() {
+                (
+                    quote! { Self::Input::#input_name },
+                    quote! { if #guard_expr },
+                )
+            } else {
+                (
+                    quote! { Self::Input::#input_name(#(ref #param_names),*) },
+                    quote! { if (#guard_expr)(#(#param_names),*) },
+                )
+            }
+        } else {
+            // No guard
+            let pattern = if using_custom_input || input_value.fields.is_empty() {
+                // For custom types or unit variants
+                quote! { Self::Input::#input_name }
+            } else {
+                // For generated tuple variants without guard, use (..) pattern
+                quote! { Self::Input::#input_name(..) }
+            };
+            (pattern, proc_macro2::TokenStream::new())
+        };
 
         transition_cases.push(quote! {
-            (Self::State::#initial_state, Self::Input::#input_value) => {
-                Some(Self::State::#final_state)
-            }
+          (Self::State::#initial_state, #input_pattern) #guard_expr => {
+            Some(Self::State::#final_state)
+          },
         });
 
-        if let Some(output_value) = output {
-            output_cases.push(quote! {
-                (Self::State::#initial_state, Self::Input::#input_value) => {
-                    Some(Self::Output::#output_value)
+        if let Some(output_spec) = output {
+            match output_spec {
+                parser::OutputSpec::Constant(output_value) => {
+                    output_cases.push(quote! {
+                      (Self::State::#initial_state, #input_pattern) #guard_expr => {
+                        Some(Self::Output::#output_value)
+                      },
+                    });
                 }
-            });
+                parser::OutputSpec::Call(call_expr) => {
+                    // Generate code to call the closure with input tuple fields
+                    let param_names = input_param_names(input_value);
 
-            #[cfg(feature = "diagram")]
-            mermaid_diagram.push_str(&format!(" [{output_value}]"));
+                    let (case_expr, param_names_expr) = if !param_names.is_empty() {
+                        // Pattern to destructure the input with references
+                        let pattern_for_call =
+                            quote! { Self::Input::#input_name(#(ref #param_names),*) };
+
+                        (
+                            quote! { (Self::State::#initial_state, #pattern_for_call) #guard_expr },
+                            quote! { (#(#param_names),*) },
+                        )
+                    } else {
+                        // Unit variant - call closure without arguments
+                        (
+                            quote! { (Self::State::#initial_state, #input_pattern) #guard_expr  },
+                            proc_macro2::TokenStream::new(),
+                        )
+                    };
+
+                    output_cases
+                        .push(quote! { #case_expr => { Some((#call_expr) #param_names_expr) }, });
+                }
+            }
         }
-
-        #[cfg(feature = "diagram")]
-        mermaid_diagram.push('\n');
 
         states.insert(initial_state);
         states.insert(final_state);
-        inputs.insert(input_value);
-        if let Some(ref output) = output {
-            outputs.insert(output);
+
+        // Store input variant with its fields
+        inputs.entry(input_name).or_insert(&input_value.fields);
+
+        // Only collect constant outputs for the Output enum
+        if let Some(parser::OutputSpec::Constant(ref output_ident)) = output {
+            outputs.insert(output_ident);
         }
     }
 
     #[cfg(feature = "diagram")]
-    mermaid_diagram.push_str("///```");
-    #[cfg(feature = "diagram")]
-    let mermaid_diagram: proc_macro2::TokenStream = mermaid_diagram.parse().unwrap();
+    let diagram = diagram::build_diagram(&input.initial_state, &transitions);
+    #[cfg(not(feature = "diagram"))]
+    let diagram = quote!();
 
     let initial_state_name = &input.initial_state;
+
+    // Generate input variants with optional tuple fields
+    let input_variants = inputs.iter().map(|(name, fields)| {
+        if !fields.is_empty() {
+            quote! { #[allow(unused)] #name(#fields) }
+        } else {
+            quote! { #[allow(unused)] #name }
+        }
+    });
 
     let (input_type, input_impl) = match input.input_type {
         Some(t) => (quote!(#t), quote!()),
@@ -122,7 +194,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             quote! {
                 #attrs
                 pub enum Input {
-                    #(#inputs),*
+                    #(#input_variants),*
                 }
             },
         ),
@@ -163,19 +235,15 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
         }
     };
 
-    #[cfg(feature = "diagram")]
-    let diagram = quote! {
-        #[cfg_attr(doc, ::rust_fsm::aquamarine)]
-        #mermaid_diagram
-    };
-
-    #[cfg(not(feature = "diagram"))]
-    let diagram = quote!();
+    // Collect use statements
+    let use_statements = &input.use_statements;
 
     let output = quote! {
         #doc
         #diagram
         #visibility mod #fsm_name {
+            #(#use_statements)*
+
             #attrs
             pub struct Impl;
 
@@ -209,4 +277,11 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     };
 
     output.into()
+}
+
+/// Generate parameter names: __arg0, __arg1, etc.
+fn input_param_names(input: &parser::InputVariant) -> Vec<Ident> {
+    (0..input.fields.len())
+        .map(|i| Ident::new(&format!("__arg{i}"), proc_macro2::Span::call_site()))
+        .collect()
 }

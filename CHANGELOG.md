@@ -7,6 +7,21 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+
+- **Tuple variant support** for input types in DSL - inputs can now
+  carry data (e.g., `Coin(u32)` or `Input(u32, String, bool)` ).
+- **Guards** for conditional state transitions - transitions can include `if` clauses
+  with closures to _evaluate conditions based on input data_.
+- **Closure-based dynamic outputs** - outputs can be computed using closures
+  that process input data (e.g., `[|x, y| compute(x, y)]`).
+
+### Changed
+
+- Updated `syn` dependency to include `full` feature.
+- `prettyprint` is an optional dependency used with diagrams to improve
+  the visibility of the code of _guards_ and _closure-based outputs_
+
 ## [0.8.0] - 2025-07-21
 
 ### Changed
@@ -134,8 +149,7 @@ adheres to [Semantic Versioning][semver].
 
 [keepachangelog]: https://keepachangelog.com/en/1.0.0/
 [semver]: https://semver.org/spec/v2.0.0.html
-[Unreleased]:
-  https://github.com/eugene-babichenko/rust-fsm/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/eugene-babichenko/rust-fsm/compare/v0.8.0...HEAD
 [0.8.0]: https://github.com/eugene-babichenko/rust-fsm/compare/v0.8.0...v0.7.0
 [0.7.0]: https://github.com/eugene-babichenko/rust-fsm/compare/v0.7.0...v0.6.2
 [0.6.2]: https://github.com/eugene-babichenko/rust-fsm/compare/v0.6.2...v0.6.1
