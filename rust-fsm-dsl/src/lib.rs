@@ -7,7 +7,9 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use std::{collections::BTreeMap, collections::BTreeSet, iter::FromIterator};
-use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, Attribute, Ident, Type};
+use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, Attribute, Expr, Ident, Type};
+
+use crate::parser::{InputVariant, OutputSpec};
 
 mod parser;
 
@@ -16,12 +18,30 @@ mod diagram;
 
 /// The full information about a state transition. Used to unify the
 /// represantion of the simple and the compact forms.
+#[derive(Clone)]
 struct Transition<'a> {
     initial_state: &'a Ident,
-    input_value: &'a parser::InputVariant,
-    guard: &'a Option<parser::Guard>,
+    input_value: &'a InputVariant,
+    guard_expr: Option<Expr>,
     final_state: &'a Ident,
-    output: &'a Option<parser::OutputSpec>,
+    output: Option<&'a OutputSpec>,
+}
+
+impl<'a> Transition<'a> {
+    pub fn new(
+        init: &'a Ident,
+        input: &'a InputVariant,
+        final_s: &'a Ident,
+        output: Option<&'a OutputSpec>,
+    ) -> Self {
+        Self {
+            initial_state: init,
+            input_value: input,
+            guard_expr: None,
+            final_state: final_s,
+            output,
+        }
+    }
 }
 
 fn attrs_to_token_stream(attrs: Vec<Attribute>) -> proc_macro2::TokenStream {
@@ -48,20 +68,57 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     let fsm_name = input.name;
     let visibility = input.visibility;
 
-    // Collect all transitions first
-    let transitions = input
+    // First, expand guards into separate transition entries
+    let transitions: Vec<_> = input
         .transitions
         .iter()
         .flat_map(|def| {
-            def.transitions.iter().map(move |transition| Transition {
-                initial_state: &def.initial_state,
-                input_value: &transition.input_value,
-                guard: &transition.guard,
-                final_state: &transition.final_state,
-                output: &transition.output,
-            })
+            def.transitions
+                .iter()
+                .flat_map(move |transition| {
+                    // Handle guards differently based on their type
+                    match &transition.guard {
+                        // Match guard with multiple arms - each arm becomes a separate transition
+                        Some(parser::Guard::Binding(binding_guard)) => {
+                            binding_guard
+                                .arms
+                                .iter()
+                                .map(|arm| {
+                                    let guard_expr = binding_guard.guard_expr_for_arm(&transition.input.fields, arm);
+                                    Transition {
+                                        initial_state: &def.initial_state,
+                                        input_value: &transition.input,
+                                        guard_expr: Some(guard_expr),
+                                        final_state: &arm.final_state,
+                                        output: arm.output.as_ref(),
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                        }
+                        // If guard with closure - single transition with guard
+                        Some(parser::Guard::Closure(closure_expr)) => {
+                            vec![Transition {
+                                initial_state: &def.initial_state,
+                                input_value: &transition.input,
+                                guard_expr: Some(closure_expr.clone()),
+                                final_state: transition.final_state.as_ref().expect("if guard must have final_state"),
+                                output: transition.output.as_ref(),
+                            }]
+                        }
+                        // No guard - single transition without guard
+                        None => {
+                            vec![Transition::new(
+                                &def.initial_state,
+                                &transition.input,
+                                transition.final_state.as_ref().expect("simple transition must have final_state"),
+                                transition.output.as_ref(),
+                            )]
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     let mut states = BTreeSet::new();
     let mut inputs: BTreeMap<&Ident, &Punctuated<Type, Comma>> = BTreeMap::new();
@@ -79,7 +136,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             initial_state,
             final_state,
             input_value,
-            guard,
+            guard_expr: guard_expr_opt,
             output,
         } = transition;
 
@@ -90,8 +147,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
         // For custom input types, we only support unit variants (without tuple fields)
 
         // When there's a guard with tuple variant, we need to bind the fields
-        let (input_pattern, guard_expr) = if let Some(guard) = guard {
-            let guard_expr = &guard.expr;
+        let (input_pattern, guard_code) = if let Some(guard_expr) = guard_expr_opt {
             let param_names = input_param_names(input_value);
 
             if param_names.is_empty() {
@@ -118,7 +174,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
         };
 
         transition_cases.push(quote! {
-          (Self::State::#initial_state, #input_pattern) #guard_expr => {
+          (Self::State::#initial_state, #input_pattern) #guard_code => {
             Some(Self::State::#final_state)
           },
         });
@@ -127,7 +183,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             match output_spec {
                 parser::OutputSpec::Constant(output_value) => {
                     output_cases.push(quote! {
-                      (Self::State::#initial_state, #input_pattern) #guard_expr => {
+                      (Self::State::#initial_state, #input_pattern) #guard_code => {
                         Some(Self::Output::#output_value)
                       },
                     });
@@ -142,13 +198,13 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
                             quote! { Self::Input::#input_name(#(ref #param_names),*) };
 
                         (
-                            quote! { (Self::State::#initial_state, #pattern_for_call) #guard_expr },
+                            quote! { (Self::State::#initial_state, #pattern_for_call) #guard_code },
                             quote! { (#(#param_names),*) },
                         )
                     } else {
                         // Unit variant - call closure without arguments
                         (
-                            quote! { (Self::State::#initial_state, #input_pattern) #guard_expr  },
+                            quote! { (Self::State::#initial_state, #input_pattern) #guard_code  },
                             proc_macro2::TokenStream::new(),
                         )
                     };

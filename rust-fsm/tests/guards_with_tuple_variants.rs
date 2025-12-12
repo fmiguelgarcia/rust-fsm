@@ -15,8 +15,10 @@ state_machine! {
         Fail => Failed
     },
     Failed => {
-        Retry(u32) if |attempts: &u32| *attempts < 3 => Processing,
-        Retry(u32) if |attempts: &u32| *attempts >= 3 => Failed [MaxRetriesExceeded],
+        Retry(u32) match attempts {
+            0..3 => Processing,
+            3.. => Failed [MaxRetriesExceeded]
+        },
         Cancel => Idle
     },
     Success(Reset) => Idle
@@ -87,9 +89,11 @@ fn test_guards_multiple_fields() {
         user_system(Pending)
 
         Pending => {
-            UserData(String, u32, bool) if |_name: &String, age: &u32, premium: &bool| *age >= 18 && *premium => VipUser,
-            UserData(String, u32, bool) if |_name: &String, age: &u32, _premium: &bool| *age >= 18 => RegularUser,
-            UserData(String, u32, bool) if |_name: &String, age: &u32, _premium: &bool| *age < 18 => MinorUser [ParentalConsentRequired],
+            UserData(String, u32, bool) match (_name, age, premium) {
+                (_, 18.., true) => VipUser,
+                (_, 18.., _) => RegularUser,
+                (_, 0..18, _) => MinorUser [ParentalConsentRequired]
+            }
         },
         VipUser(Downgrade) => RegularUser,
         RegularUser(Upgrade) => VipUser,

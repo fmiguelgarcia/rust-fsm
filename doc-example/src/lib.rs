@@ -33,8 +33,10 @@ state_machine! {
     Idle => {
         Add(i32, i32) => Idle [|a: &i32, b: &i32| CalcOutput::Result(a + b)],
         Multiply(i32, i32) => Idle [|x: &i32, y: &i32| CalcOutput::Result(x * y)],
-        Divide(i32, i32) if |_, y: &i32| *y == 0 => ErrDivByZero,
-        Divide(i32, i32) if |_, y: &i32| *y != 0 => Idle [ |x, y| CalcOutput::Result(x/y)],
+        Divide(i32, i32) match (x, y) {
+            (_, 0) => ErrDivByZero,
+            (_, _) => Idle [ |x, y| CalcOutput::Result(x/y)]
+        }
     },
     ErrDivByZero(Reset) => Idle [Clear]
 }

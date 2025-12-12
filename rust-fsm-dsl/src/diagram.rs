@@ -36,10 +36,28 @@ pub fn sanitize_expr(expr: &Expr) -> String {
     };
 
     #[cfg(feature = "pretty-print")]
-    let expr_str = content[start + 1..end].trim();
+    let expr_str = {
+        let trimmed = content[start + 1..end].trim();
+        // Remove newlines for Mermaid compatibility
+        trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
 
     #[cfg(not(feature = "pretty-print"))]
-    let expr_str = quote! { #expr };
+    let expr_str = {
+        let raw = quote! { #expr }.to_string();
+        // Remove newlines and excessive whitespace
+        let single_line = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        // Remove spaces around punctuation
+        single_line
+            .replace(" : ", ":")
+            .replace(" , ", ",")
+            .replace(" ( ", "(")
+            .replace(" ) ", ")")
+            .replace("( ", "(")
+            .replace(" )", ")")
+            .replace(" .", ".")
+            .replace(" ;", ";")
+    };
 
     // Mermaid fixes
     expr_str.replace(":", "")
@@ -76,7 +94,7 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
     let mut choice_states_generated = BTreeSet::new();
     for ((state, input_name), input_transitions) in &transitions_by_state_input {
         // Check if this input has multiple transitions with guards
-        let has_guards = input_transitions.iter().any(|t| t.guard.is_some());
+        let has_guards = input_transitions.iter().any(|t| t.guard_expr.is_some());
         if has_guards && input_transitions.len() > 1 {
             choice_states_generated.insert((*state, *input_name));
         }
@@ -171,10 +189,10 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
                 // Generate transitions from choice state to final states
                 for guarded_transition in input_transitions {
                     let guard_label = guarded_transition
-                        .guard
+                        .guard_expr
                         .as_ref()
-                        .map(|guard| {
-                            let expr_str = sanitize_expr(&guard.expr);
+                        .map(|guard_expr| {
+                            let expr_str = sanitize_expr(guard_expr);
                             format!(":{expr_str}")
                         })
                         .unwrap_or_default();

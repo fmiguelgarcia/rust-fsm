@@ -6,8 +6,10 @@ state_machine! {
     turnstile(Locked)
 
     Locked => {
-        Coin(u32) if |amount: &u32| *amount >= 50 => Unlocked,
-        Coin(u32) if |amount: &u32| *amount < 50 => Locked [RefundInsufficient],
+        Coin(u32) match amount {
+            0..50 => Locked [RefundInsufficient],
+            50.. => Unlocked
+        },
         Push => Locked [AccessDenied]
     },
     Unlocked => {
