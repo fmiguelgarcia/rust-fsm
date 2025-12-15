@@ -51,6 +51,7 @@ pub enum StringOutput {
 
 state_machine! {
     #[derive(Debug)]
+    #[allow(unused)]
     #[state_machine(output(StringOutput))]
     string_processor(Ready)
 
@@ -94,6 +95,7 @@ pub enum ValidatorOutput {
 
 state_machine! {
     #[derive(Debug)]
+    #[allow(unused)]
     #[state_machine(output(ValidatorOutput))]
     validator(Waiting)
 

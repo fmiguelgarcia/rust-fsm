@@ -12,6 +12,7 @@ state_machine! {
 }
 
 state_machine! {
+    #[allow(unused)]
     complex_machine(Start)
 
     Start => {

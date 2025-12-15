@@ -1,3 +1,5 @@
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream, Result},
@@ -12,6 +14,19 @@ pub type InputFields = Punctuated<Type, Token![,]>;
 pub struct InputVariant {
     pub name: Ident,
     pub fields: InputFields,
+}
+
+impl InputVariant {
+    pub fn code_gen(&self) -> TokenStream {
+        let name = &self.name;
+
+        if !self.fields.is_empty() {
+            let fields = &self.fields;
+            quote! { #name (#fields) }
+        } else {
+            quote! { #name }
+        }
+    }
 }
 
 impl Parse for InputVariant {

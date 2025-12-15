@@ -3,6 +3,7 @@ use rust_fsm::*;
 
 state_machine! {
     #[derive(Debug, PartialEq, Eq)]
+    #[allow(unused)]
     payment_system(Idle)
 
     Idle => {
@@ -86,6 +87,7 @@ fn test_guards_with_retry_logic() {
 fn test_guards_multiple_fields() {
     state_machine! {
         #[derive(Debug, PartialEq)]
+        #[allow(unused)]
         user_system(Pending)
 
         Pending => {

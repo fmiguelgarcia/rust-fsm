@@ -5,49 +5,21 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
-use std::{collections::BTreeMap, collections::BTreeSet, iter::FromIterator};
-use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, Attribute, Expr, Ident, Type};
+use quote::quote;
+use std::collections::BTreeSet;
+use syn::parse_macro_input;
 
-use crate::parser::{InputVariant, OutputSpec};
-
+mod code_gen;
+use code_gen::attrs_to_token_stream;
+mod match_case;
+use match_case::MatchCase;
 mod parser;
+use parser::TransitionDef;
+
+use crate::parser::InputVariant;
 
 #[cfg(feature = "diagram")]
 mod diagram;
-
-/// The full information about a state transition. Used to unify the
-/// represantion of the simple and the compact forms.
-#[derive(Clone)]
-struct Transition<'a> {
-    initial_state: &'a Ident,
-    input_value: &'a InputVariant,
-    guard_expr: Option<Expr>,
-    final_state: &'a Ident,
-    output: Option<&'a OutputSpec>,
-}
-
-impl<'a> Transition<'a> {
-    pub fn new(
-        init: &'a Ident,
-        input: &'a InputVariant,
-        final_s: &'a Ident,
-        output: Option<&'a OutputSpec>,
-    ) -> Self {
-        Self {
-            initial_state: init,
-            input_value: input,
-            guard_expr: None,
-            final_state: final_s,
-            output,
-        }
-    }
-}
-
-fn attrs_to_token_stream(attrs: Vec<Attribute>) -> proc_macro2::TokenStream {
-    let attrs = attrs.into_iter().map(ToTokens::into_token_stream);
-    proc_macro2::TokenStream::from_iter(attrs)
-}
 
 #[proc_macro]
 /// Produce a state machine definition from the provided `rust-fmt` DSL
@@ -69,184 +41,49 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     let visibility = input.visibility;
 
     // First, expand guards into separate transition entries
-    let transitions: Vec<_> = input
+    let match_cases: Vec<_> = input
         .transitions
         .iter()
-        .flat_map(|def| {
-            def.transitions
-                .iter()
-                .flat_map(move |transition| {
-                    // Handle guards differently based on their type
-                    match &transition.guard {
-                        // Match guard with multiple arms - each arm becomes a separate transition
-                        Some(parser::Guard::Binding(binding_guard)) => binding_guard
-                            .arms
-                            .iter()
-                            .map(|arm| {
-                                let guard_expr =
-                                    binding_guard.guard_expr_for_arm(&transition.input.fields, arm);
-                                Transition {
-                                    initial_state: &def.initial_state,
-                                    input_value: &transition.input,
-                                    guard_expr: Some(guard_expr),
-                                    final_state: &arm.final_state,
-                                    output: arm.output.as_ref(),
-                                }
-                            })
-                            .collect::<Vec<_>>(),
-                        // If guard with closure - single transition with guard
-                        Some(parser::Guard::Closure(closure_expr)) => {
-                            vec![Transition {
-                                initial_state: &def.initial_state,
-                                input_value: &transition.input,
-                                guard_expr: Some(closure_expr.clone()),
-                                final_state: transition
-                                    .final_state
-                                    .as_ref()
-                                    .expect("if guard must have final_state"),
-                                output: transition.output.as_ref(),
-                            }]
-                        }
-                        // No guard - single transition without guard
-                        None => {
-                            vec![Transition::new(
-                                &def.initial_state,
-                                &transition.input,
-                                transition
-                                    .final_state
-                                    .as_ref()
-                                    .expect("simple transition must have final_state"),
-                                transition.output.as_ref(),
-                            )]
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
+        .flat_map(TransitionDef::as_match_cases)
         .collect();
 
-    let mut states = BTreeSet::new();
-    let mut inputs: BTreeMap<&Ident, &Punctuated<Type, Comma>> = BTreeMap::new();
-    let mut outputs = BTreeSet::new();
-    let mut transition_cases = Vec::new();
-    let mut output_cases = Vec::new();
-
+    // Types: State, Input, and Output
+    let mut states = match_cases
+        .iter()
+        .flat_map(|mc| [mc.state, mc.next_state])
+        .collect::<BTreeSet<_>>();
     states.insert(&input.initial_state);
 
-    // Check if we're using a custom input type
-    let using_custom_input = input.def_attrs.input_type.is_some();
+    // Inputs: Remove duplicated variants due to multiple match cases.
+    let mut inputs = match_cases.iter().map(|mc| mc.input).collect::<Vec<_>>();
+    inputs.sort_by_key(|i| &i.name);
+    inputs.dedup_by_key(|i| &i.name);
+    let inputs = inputs
+        .into_iter()
+        .map(InputVariant::code_gen)
+        .collect::<Vec<_>>();
 
-    for transition in &transitions {
-        let Transition {
-            initial_state,
-            final_state,
-            input_value,
-            guard_expr: guard_expr_opt,
-            output,
-        } = transition;
+    let outputs = match_cases
+        .iter()
+        .filter_map(MatchCase::constant_output)
+        .collect::<BTreeSet<_>>();
 
-        let input_name = &input_value.name;
-
-        // Generate match cases
-        // For generated input types, we know exactly which pattern to use based on the DSL
-        // For custom input types, we only support unit variants (without tuple fields)
-
-        // When there's a guard with tuple variant, we need to bind the fields
-        let (input_pattern, guard_code) = if let Some(guard_expr) = guard_expr_opt {
-            let param_names = input_param_names(input_value);
-
-            if param_names.is_empty() {
-                (
-                    quote! { Self::Input::#input_name },
-                    quote! { if #guard_expr },
-                )
-            } else {
-                (
-                    quote! { Self::Input::#input_name(#(ref #param_names),*) },
-                    quote! { if (#guard_expr)(#(#param_names),*) },
-                )
-            }
-        } else {
-            // No guard
-            let pattern = if using_custom_input || input_value.fields.is_empty() {
-                // For custom types or unit variants
-                quote! { Self::Input::#input_name }
-            } else {
-                // For generated tuple variants without guard, use (..) pattern
-                quote! { Self::Input::#input_name(..) }
-            };
-            (pattern, proc_macro2::TokenStream::new())
-        };
-
-        transition_cases.push(quote! {
-          (Self::State::#initial_state, #input_pattern) #guard_code => {
-            Some(Self::State::#final_state)
-          },
-        });
-
-        if let Some(output_spec) = output {
-            match output_spec {
-                parser::OutputSpec::Constant(output_value) => {
-                    output_cases.push(quote! {
-                      (Self::State::#initial_state, #input_pattern) #guard_code => {
-                        Some(Self::Output::#output_value)
-                      },
-                    });
-                }
-                parser::OutputSpec::Call(call_expr) => {
-                    // Generate code to call the closure with input tuple fields
-                    let param_names = input_param_names(input_value);
-
-                    let (case_expr, param_names_expr) = if !param_names.is_empty() {
-                        // Pattern to destructure the input with references
-                        let pattern_for_call =
-                            quote! { Self::Input::#input_name(#(ref #param_names),*) };
-
-                        (
-                            quote! { (Self::State::#initial_state, #pattern_for_call) #guard_code },
-                            quote! { (#(#param_names),*) },
-                        )
-                    } else {
-                        // Unit variant - call closure without arguments
-                        (
-                            quote! { (Self::State::#initial_state, #input_pattern) #guard_code  },
-                            proc_macro2::TokenStream::new(),
-                        )
-                    };
-
-                    output_cases
-                        .push(quote! { #case_expr => { Some((#call_expr) #param_names_expr) }, });
-                }
-            }
-        }
-
-        states.insert(initial_state);
-        states.insert(final_state);
-
-        // Store input variant with its fields
-        inputs.entry(input_name).or_insert(&input_value.fields);
-
-        // Only collect constant outputs for the Output enum
-        if let Some(parser::OutputSpec::Constant(ref output_ident)) = output {
-            outputs.insert(output_ident);
-        }
-    }
+    // Transitions & outpus
+    let transition_cases = match_cases
+        .iter()
+        .map(MatchCase::code_gen_transition_case)
+        .collect::<Vec<_>>();
+    let output_cases = match_cases
+        .iter()
+        .filter_map(MatchCase::code_gen_output_case)
+        .collect::<Vec<_>>();
 
     #[cfg(feature = "diagram")]
-    let diagram = diagram::build_diagram(&input.initial_state, &transitions);
+    let diagram = diagram::build_diagram(&input.initial_state, &match_cases);
     #[cfg(not(feature = "diagram"))]
     let diagram = quote!();
 
     let initial_state_name = &input.initial_state;
-
-    // Generate input variants with optional tuple fields
-    let input_variants = inputs.iter().map(|(name, fields)| {
-        if !fields.is_empty() {
-            quote! { #[allow(unused)] #name(#fields) }
-        } else {
-            quote! { #[allow(unused)] #name }
-        }
-    });
 
     let (input_type, input_impl) = match input.def_attrs.input_type {
         Some(t) => (quote!(#t), quote!()),
@@ -255,7 +92,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             quote! {
                 #attrs
                 pub enum Input {
-                    #(#input_variants),*
+                    #(#inputs),*
                 }
             },
         ),
@@ -368,11 +205,4 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     };
 
     output.into()
-}
-
-/// Generate parameter names: __arg0, __arg1, etc.
-fn input_param_names(input: &parser::InputVariant) -> Vec<Ident> {
-    (0..input.fields.len())
-        .map(|i| Ident::new(&format!("__arg{i}"), proc_macro2::Span::call_site()))
-        .collect()
 }

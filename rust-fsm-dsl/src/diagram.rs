@@ -1,4 +1,4 @@
-use crate::{parser, Transition};
+use crate::{parser, MatchCase};
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -63,14 +63,14 @@ pub fn sanitize_expr(expr: &Expr) -> String {
     expr_str.replace(":", "")
 }
 
-pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> TokenStream {
+pub fn build_diagram(initial_state: &Ident, transitions: &[MatchCase]) -> TokenStream {
     // Track transitions per state to detect nested states
-    let mut transitions_per_state: BTreeMap<&Ident, Vec<&Transition>> = BTreeMap::new();
+    let mut transitions_per_state: BTreeMap<&Ident, Vec<&MatchCase>> = BTreeMap::new();
 
     // Group transitions by initial state
     for transition in transitions {
         transitions_per_state
-            .entry(transition.initial_state)
+            .entry(transition.state)
             .or_default()
             .push(transition);
     }
@@ -81,11 +81,11 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
     );
 
     // Group transitions by (state, input_name) to detect guards
-    let mut transitions_by_state_input: BTreeMap<(&Ident, &Ident), Vec<&Transition>> =
+    let mut transitions_by_state_input: BTreeMap<(&Ident, &Ident), Vec<&MatchCase>> =
         BTreeMap::new();
     for transition in transitions {
         transitions_by_state_input
-            .entry((transition.initial_state, &transition.input_value.name))
+            .entry((transition.state, &transition.input.name))
             .or_default()
             .push(transition);
     }
@@ -105,8 +105,8 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
         // Collect all self-referencing inputs (those that loop back to the same state)
         let self_loop_inputs: BTreeSet<&Ident> = state_transitions
             .iter()
-            .filter(|t| t.final_state == *state)
-            .map(|t| &t.input_value.name)
+            .filter(|t| t.next_state == *state)
+            .map(|t| &t.input.name)
             .collect();
 
         // Check if this is a nested state (multiple self-loop inputs)
@@ -150,8 +150,8 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
         // Collect all self-referencing inputs
         let self_loop_inputs: BTreeSet<&Ident> = state_transitions
             .iter()
-            .filter(|t| t.final_state == *state)
-            .map(|t| &t.input_value.name)
+            .filter(|t| t.next_state == *state)
+            .map(|t| &t.input.name)
             .collect();
 
         // Check if this is a nested state
@@ -162,7 +162,7 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
 
         // Generate transitions to other states
         for transition in state_transitions.iter() {
-            let input_name = &transition.input_value.name;
+            let input_name = &transition.input.name;
             let key = (*state, input_name);
 
             // Skip if already processed this input (for guarded transitions)
@@ -176,7 +176,7 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
                 let input_transitions = &transitions_by_state_input[&key];
 
                 // Check if this input is part of a self-loop (any transition returns to same state)
-                let has_self_loop = input_transitions.iter().any(|t| t.final_state == *state);
+                let has_self_loop = input_transitions.iter().any(|t| t.next_state == *state);
 
                 // Only generate transition from state to choice state if:
                 // - The state is NOT nested, OR
@@ -199,22 +199,22 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
 
                     diagram.push_str(&format!(
                         "///    {} --> {}{}\n",
-                        choice_state_name, guarded_transition.final_state, guard_label
+                        choice_state_name, guarded_transition.next_state, guard_label
                     ));
                 }
 
                 processed_inputs.insert(key);
-            } else if transition.final_state != *state {
+            } else if transition.next_state != *state {
                 // Show the input name as the transition label for non-guarded transitions
                 diagram.push_str(&format!(
                     "///    {} --> {}: {}\n",
-                    state, transition.final_state, input_name
+                    state, transition.next_state, input_name
                 ));
                 processed_inputs.insert(key);
             } else if !is_nested {
                 // For single self-loops that aren't part of a nested state
-                let fields_expr = if !transition.input_value.fields.is_empty() {
-                    let fields = &transition.input_value.fields;
+                let fields_expr = if !transition.input.fields.is_empty() {
+                    let fields = &transition.input.fields;
                     format!(" ({})", quote! { #fields })
                 } else {
                     String::new()
@@ -227,7 +227,7 @@ pub fn build_diagram(initial_state: &Ident, transitions: &[Transition]) -> Token
                     };
                 diagram.push_str(&format!(
                     "///    {} --> {}: {}{}{}\n",
-                    state, transition.final_state, input_name, fields_expr, output_str
+                    state, transition.next_state, input_name, fields_expr, output_str
                 ));
                 processed_inputs.insert(key);
             }

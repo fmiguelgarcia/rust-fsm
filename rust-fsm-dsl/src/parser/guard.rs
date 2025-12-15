@@ -27,12 +27,16 @@ impl BindingGuard {
         );
 
         let pattern = &arm.pattern;
-        
+
         // Pair each binding with its corresponding field type
-        let params = self.bindings.iter().zip(fields.iter()).map(|(binding, field_type)| {
-            quote::quote! { #binding: &#field_type }
-        });
-        
+        let params = self
+            .bindings
+            .iter()
+            .zip(fields.iter())
+            .map(|(binding, field_type)| {
+                quote::quote! { #binding: &#field_type }
+            });
+
         let bindings = &self.bindings.iter().collect::<Vec<_>>();
 
         // Generate a closure that takes individual bindings (not as a tuple)

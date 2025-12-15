@@ -13,6 +13,12 @@ pub enum OutputSpec {
     Call(Expr),
 }
 
+impl OutputSpec {
+    pub fn is_expr(&self) -> bool {
+        matches!(self, OutputSpec::Call(..))
+    }
+}
+
 impl Parse for OutputSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let output_content;
