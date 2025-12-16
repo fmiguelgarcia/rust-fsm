@@ -243,9 +243,58 @@ pub use aquamarine::aquamarine;
 /// machine/transducer. This is just a formal definition that may be
 /// inconvenient to be used in practical programming, but it is used throughout
 /// this library for more practical things.
+///
+/// The trait uses Generic Associated Types (GATs) to allow the input type to
+/// have a lifetime parameter. This enables state machines to accept inputs
+/// containing non-static references.
+///
+/// # Example with non-static references
+///
+/// ```rust
+/// use rust_fsm::{StateMachineImpl, StateMachine};
+///
+/// // Input type with a lifetime parameter
+/// enum ParserInput<'a> {
+///     Data(&'a [u8]),
+///     Flush,
+/// }
+///
+/// #[derive(Clone, Copy, PartialEq, Debug)]
+/// enum ParserState {
+///     Idle,
+///     Processing,
+/// }
+///
+/// struct ParserImpl;
+///
+/// impl StateMachineImpl for ParserImpl {
+///     type Input<'a> = ParserInput<'a>;
+///     type State = ParserState;
+///     type Output = ();
+///     const INITIAL_STATE: Self::State = ParserState::Idle;
+///
+///     fn transition<'a>(state: &Self::State, input: &Self::Input<'a>) -> Option<Self::State> {
+///         match (state, input) {
+///             (ParserState::Idle, ParserInput::Data(d)) if !d.is_empty() => Some(ParserState::Processing),
+///             (ParserState::Processing, ParserInput::Flush) => Some(ParserState::Idle),
+///             _ => None,
+///         }
+///     }
+///
+///     fn output<'a>(_state: &Self::State, _input: &Self::Input<'a>) -> Option<Self::Output> {
+///         None
+///     }
+/// }
+///
+/// let mut machine = StateMachine::<ParserImpl>::new();
+/// let local_data = vec![1, 2, 3];
+/// machine.consume(&ParserInput::Data(&local_data)).unwrap();
+/// assert_eq!(machine.state(), &ParserState::Processing);
+/// ```
 pub trait StateMachineImpl {
-    /// The input alphabet.
-    type Input;
+    /// The input alphabet. Uses a GAT to support lifetimes in input types,
+    /// enabling non-static references in inputs.
+    type Input<'a>;
     /// The set of possible states.
     type State;
     /// The output alphabet.
@@ -257,16 +306,16 @@ pub trait StateMachineImpl {
     /// The transition fuction that outputs a new state based on the current
     /// state and the provided input. Outputs `None` when there is no transition
     /// for a given combination of the input and the state.
-    fn transition(state: &Self::State, input: &Self::Input) -> Option<Self::State>;
+    fn transition<'a>(state: &Self::State, input: &Self::Input<'a>) -> Option<Self::State>;
     /// The output function that outputs some value from the output alphabet
     /// based on the current state and the given input. Outputs `None` when
     /// there is no output for a given combination of the input and the state.
-    fn output(state: &Self::State, input: &Self::Input) -> Option<Self::Output>;
+    fn output<'a>(state: &Self::State, input: &Self::Input<'a>) -> Option<Self::Output>;
 
-    fn before_transition(_state: &Self::State, _input: &Self::Input) {}
-    fn after_transition(
+    fn before_transition<'a>(_state: &Self::State, _input: &Self::Input<'a>) {}
+    fn after_transition<'a>(
         _pre_state: &Self::State,
-        _input: &Self::Input,
+        _input: &Self::Input<'a>,
         _state: &Self::State,
         _output: Option<&Self::Output>,
     ) {
@@ -305,9 +354,11 @@ where
     /// transition. If a state transition with the current state and the
     /// provided input is not allowed, returns an error.
     ///
-    pub fn consume(
+    /// The input can contain non-static references thanks to the GAT-based
+    /// `Input<'a>` type.
+    pub fn consume<'a>(
         &mut self,
-        input: &T::Input,
+        input: &T::Input<'a>,
     ) -> Result<Option<T::Output>, TransitionImpossibleError> {
         let Some(mut state) = T::transition(&self.state, input) else {
             return Err(TransitionImpossibleError);

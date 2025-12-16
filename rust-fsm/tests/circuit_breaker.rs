@@ -26,12 +26,12 @@ struct CircuitBreakerOutputSetTimer;
 struct CircuitBreakerMachine;
 
 impl StateMachineImpl for CircuitBreakerMachine {
-    type Input = CircuitBreakerInput;
+    type Input<'a> = CircuitBreakerInput;
     type State = CircuitBreakerState;
     type Output = CircuitBreakerOutputSetTimer;
     const INITIAL_STATE: Self::State = CircuitBreakerState::Closed;
 
-    fn transition(state: &Self::State, input: &Self::Input) -> Option<Self::State> {
+    fn transition<'a>(state: &Self::State, input: &Self::Input<'a>) -> Option<Self::State> {
         match (state, input) {
             (CircuitBreakerState::Closed, CircuitBreakerInput::Unsuccessful) => {
                 Some(CircuitBreakerState::Open)
@@ -49,7 +49,7 @@ impl StateMachineImpl for CircuitBreakerMachine {
         }
     }
 
-    fn output(state: &Self::State, input: &Self::Input) -> Option<Self::Output> {
+    fn output<'a>(state: &Self::State, input: &Self::Input<'a>) -> Option<Self::Output> {
         match (state, input) {
             (CircuitBreakerState::Closed, CircuitBreakerInput::Unsuccessful) => {
                 Some(CircuitBreakerOutputSetTimer)

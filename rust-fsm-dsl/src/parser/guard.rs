@@ -1,4 +1,7 @@
-use crate::parser::{InputFields, MatchArm};
+use crate::{
+    code_gen::is_reference_type,
+    parser::{InputFields, MatchArm},
+};
 
 use syn::{
     braced, parenthesized,
@@ -28,13 +31,20 @@ impl BindingGuard {
 
         let pattern = &arm.pattern;
 
-        // Pair each binding with its corresponding field type
+        // Pair each binding with its corresponding field type.
+        // If the field type is already a reference, don't add another `&`.
         let params = self
             .bindings
             .iter()
             .zip(fields.iter())
             .map(|(binding, field_type)| {
-                quote::quote! { #binding: &#field_type }
+                if is_reference_type(field_type) {
+                    // Type is already a reference (e.g., &str), use it as-is
+                    quote::quote! { #binding: #field_type }
+                } else {
+                    // Type is not a reference, add & to create a reference
+                    quote::quote! { #binding: &#field_type }
+                }
             });
 
         let bindings = &self.bindings.iter().collect::<Vec<_>>();

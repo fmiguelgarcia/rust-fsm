@@ -77,7 +77,7 @@ impl<'a> MatchCase<'a> {
     /// ```
     ///
     /// This generates patterns like:
-    /// - `Self::Input::Coin(ref __arg0)` - when guard or output needs the parameter
+    /// - `Self::Input::Coin(__arg0)` - when guard or output needs the parameter
     /// - `Self::Input::Coin(..)` - when parameters are not needed
     /// - `Self::Input::Push` - for unit variants with no fields
     fn code_gen_input_patern(&self) -> TokenStream {
@@ -91,7 +91,7 @@ impl<'a> MatchCase<'a> {
 
             if use_param_names {
                 let param_names = input_param_names(self.input);
-                quote! { Self::Input::#input_name(#(ref #param_names),*) }
+                quote! { Self::Input::#input_name(#(#param_names),*) }
             } else {
                 quote! { Self::Input::#input_name(..) }
             }

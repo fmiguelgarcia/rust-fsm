@@ -1,7 +1,7 @@
 use crate::parser::InputVariant;
 
 use proc_macro2::Span;
-use syn::{Attribute, Ident};
+use syn::{Attribute, Ident, Type};
 
 use quote::ToTokens;
 
@@ -10,6 +10,14 @@ pub fn input_param_names(input: &InputVariant) -> Vec<Ident> {
     (0..input.fields.len())
         .map(|i| Ident::new(&format!("__arg{i}"), Span::call_site()))
         .collect()
+}
+
+/// Check if a type is a reference type (e.g., `&str`, `&[u8]`, `&'a T`).
+///
+/// This is used to avoid adding an extra `&` when generating guard parameters
+/// for types that are already references.
+pub fn is_reference_type(ty: &Type) -> bool {
+    matches!(ty, Type::Reference(_))
 }
 
 /// Convert a vector of attributes into a token stream.

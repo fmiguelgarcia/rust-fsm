@@ -139,7 +139,7 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     // Generate before_transition implementation if provided
     let before_transition_impl = if let Some(ref expr) = input.def_attrs.before_transition {
         quote! {
-            fn before_transition(state: &Self::State, input: &Self::Input) {
+            fn before_transition<'__input_lifetime>(state: &Self::State, input: &Self::Input<'__input_lifetime>) {
                 (#expr)(state, input)
             }
         }
@@ -150,9 +150,9 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
     // Generate after_transition implementation if provided
     let after_transition_impl = if let Some(ref expr) = input.def_attrs.after_transition {
         quote! {
-            fn after_transition(
+            fn after_transition<'__input_lifetime>(
                 pre_state: &Self::State,
-                input: &Self::Input,
+                input: &Self::Input<'__input_lifetime>,
                 state: &Self::State,
                 output: Option<&Self::Output>,
             ) {
@@ -179,19 +179,19 @@ pub fn state_machine(tokens: TokenStream) -> TokenStream {
             #output_impl
 
             impl ::rust_fsm::StateMachineImpl for Impl {
-                type Input = #input_type;
+                type Input<'__input_lifetime> = #input_type;
                 type State = #state_type;
                 type Output = #output_type;
                 const INITIAL_STATE: Self::State = Self::State::#initial_state_name;
 
-                fn transition(state: &Self::State, input: &Self::Input) -> Option<Self::State> {
+                fn transition<'__input_lifetime>(state: &Self::State, input: &Self::Input<'__input_lifetime>) -> Option<Self::State> {
                     match (state, input) {
                         #(#transition_cases)*
                         _ => None,
                     }
                 }
 
-                fn output(state: &Self::State, input: &Self::Input) -> Option<Self::Output> {
+                fn output<'__input_lifetime>(state: &Self::State, input: &Self::Input<'__input_lifetime>) -> Option<Self::Output> {
                     match (state, input) {
                         #(#output_cases)*
                         _ => None,
