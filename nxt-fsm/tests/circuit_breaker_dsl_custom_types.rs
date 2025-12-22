@@ -1,13 +1,30 @@
 /// A dummy implementation of the Circuit Breaker pattern to demonstrate
 /// capabilities of its library DSL for defining finite state machines.
 /// https://martinfowler.com/bliki/CircuitBreaker.html
-use rust_fsm::*;
+use nxt_fsm::*;
 use std::{
 	sync::{Arc, Mutex},
 	time::Duration,
 };
 
+pub enum Input {
+	Successful,
+	Unsuccessful,
+	TimerTriggered,
+}
+
+pub enum State {
+	Closed,
+	HalfOpen,
+	Open,
+}
+
+pub enum Output {
+	SetupTimer,
+}
+
 state_machine! {
+	#[state_machine(input(crate::Input), state(crate::State), output(crate::Output))]
 	circuit_breaker(Closed)
 
 	Closed(Unsuccessful) => Open [SetupTimer],
@@ -19,10 +36,8 @@ state_machine! {
 }
 
 #[test]
-fn circit_breaker_dsl() {
-	use circuit_breaker::{Input, Output, State, StateMachine};
-
-	let machine = StateMachine::new();
+fn circuit_breaker_dsl_custom_types() {
+	let machine = circuit_breaker::StateMachine::new();
 
 	// Unsuccessful request
 	let machine = Arc::new(Mutex::new(machine));

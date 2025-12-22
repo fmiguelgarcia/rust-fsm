@@ -1,3 +1,33 @@
 [workspace]
 resolver = "2"
-members = ["rust-fsm", "rust-fsm-dsl", "doc-example"]
+members = ["nxt-fsm", "nxt-fsm-dsl", "doc-example"]
+
+[workspace.package]
+edition = "2021"
+authors = ["Francisco Miguel Garcia"]
+homepage = "https://github.com/fmiguelgarcia/nxt-fsm"
+repository = "https://github.com/fmiguelgarcia/nxt-fsm"
+documentation = "https://docs.rs/nxt-fsm/"
+license = "MIT"
+categories = ["data-structures", "rust-patterns"]
+keywords = ["fsm", "state-machine", "statechart"]
+
+[workspace.lints.clippy]
+tabs_in_doc_comments = { level = "allow", priority = 2 }
+
+[workspace.dependencies]
+nxt-fsm-dsl = { path = "nxt-fsm-dsl" }
+nxt-fsm = { path = "nxt-fsm" }
+
+
+# Macro
+proc-macro2 = "1"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+prettyplease = "0.2"
+
+# Tests
+test-case = "3"
+
+# Diagram
+aquamarine = "0.6"

@@ -1,0 +1,29 @@
+[package]
+name = "nxt-fsm-dsl"
+version = "0.9.0"
+description = "Macros for rust-fsm DSL"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "../README.md"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+diagram = ["prettyplease"]
+
+[dependencies]
+proc-macro2.workspace = true
+syn.workspace = true
+quote.workspace = true
+prettyplease = { workspace = true, optional = true }

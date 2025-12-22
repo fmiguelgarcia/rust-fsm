@@ -1,7 +1,17 @@
 [package]
 name = "doc-example"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-rust-fsm = { path = "../rust-fsm", version = "0.9", features = ["diagram", "pretty-print"] }
+nxt-fsm = { workspace = true, features = ["diagram"] }

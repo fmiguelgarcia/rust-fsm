@@ -1,4 +1,4 @@
-use rust_fsm::state_machine;
+use nxt_fsm::state_machine;
 
 state_machine! {
 	/// A dummy implementation of the Circuit Breaker pattern to demonstrate

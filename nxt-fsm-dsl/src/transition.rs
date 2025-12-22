@@ -31,9 +31,36 @@ pub struct Transition {
 	mode: TransitionMode,
 }
 
+impl Transition {
+	#[cfg(feature = "diagram")]
+	pub fn diagram(&self) -> Vec<String> {
+		use crate::diagram::{sanitize_closure, sanitize_expr};
+
+		let state = self.parent_state.as_ref().expect(TN_PARENT_STATE_EXP);
+		match &self.mode {
+			TransitionMode::Single(stn) => {
+				let guard = stn.guard.as_ref().map(sanitize_closure).unwrap_or_default();
+				let next_state = &stn.next_state;
+
+				let diagram_line = format!("///    {state} --> {next_state}: {} {guard}\n", self.event.name);
+				vec![diagram_line]
+			},
+			TransitionMode::Multiple(mtn) => mtn
+				.sub_transitions
+				.iter()
+				.map(|sub| {
+					let next_state = &sub.next_state;
+					let guard = sanitize_expr(&sub.pattern);
+					format!("///    {state} --> {next_state}: {} {guard}\n", self.event.name)
+				})
+				.collect(),
+		}
+	}
+}
+
 impl ToTokens for Transition {
 	fn to_tokens(&self, tokens: &mut TokenStream) {
-		let state = self.parent_state.as_ref().expect("Transition is always in a State .qed");
+		let state = self.parent_state.as_ref().expect(TN_PARENT_STATE_EXP);
 		let code = match &self.mode {
 			TransitionMode::Single(tn) => {
 				let event = self.event.transition_case();
@@ -99,3 +126,5 @@ impl UsedTypes for Transition {
 		once(&self.event).collect()
 	}
 }
+
+static TN_PARENT_STATE_EXP: &str = "Transition is always in a State .qed";

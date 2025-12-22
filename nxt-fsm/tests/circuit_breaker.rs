@@ -1,7 +1,7 @@
 /// A dummy implementation of the Circuit Breaker pattern to demonstrate
 /// capabilities of this library.
 /// https://martinfowler.com/bliki/CircuitBreaker.html
-use rust_fsm::*;
+use nxt_fsm::*;
 use std::{
 	sync::{Arc, Mutex},
 	time::Duration,

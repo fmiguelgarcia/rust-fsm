@@ -64,7 +64,7 @@ macros system).
 The DSL is parsed by the `state_machine` macro. Here is a little example.
 
 ```rust
-use rust_fsm::*;
+use nxt_fsm::*;
 
 state_machine! {
 	#[derive(Debug)]
@@ -137,7 +137,7 @@ transition.
 You can specify visibility like this:
 
 ```rust
-use rust_fsm::*;
+use nxt_fsm::*;
 
 state_machine! {
 	pub CircuitBreaker(Closed)
@@ -160,7 +160,7 @@ optional: you can use only one of them or all of them at once if you want to.
 The current limitation is that you have to supply a fully qualified type path.
 
 ```rust,ignore
-use rust_fsm::*;
+use nxt_fsm::*;
 
 pub enum Input {
 	Successful,
@@ -234,7 +234,7 @@ use core::fmt;
 use std::error::Error;
 
 #[cfg(feature = "dsl")]
-pub use rust_fsm_dsl::state_machine;
+pub use nxt_fsm_dsl::state_machine;
 
 #[cfg(feature = "diagram")]
 pub use aquamarine::aquamarine;
@@ -251,7 +251,7 @@ pub use aquamarine::aquamarine;
 /// # Example with non-static references
 ///
 /// ```rust
-/// use rust_fsm::{StateMachineImpl, StateMachine};
+/// use nxt_fsm::{StateMachineImpl, StateMachine};
 ///
 /// // Input type with a lifetime parameter
 /// enum ParserInput<'a> {

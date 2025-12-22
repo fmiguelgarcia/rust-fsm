@@ -1,4 +1,4 @@
-use rust_fsm::*;
+use nxt_fsm::*;
 
 state_machine! {
 #[derive(Debug)]

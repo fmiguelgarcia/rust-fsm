@@ -140,22 +140,28 @@ impl ToTokens for StateMachineDef {
 		let (output_type, output_impl) = self.output_to_tokens();
 		let transition_cases = &self.states;
 
+		#[cfg(feature = "diagram")]
+		let diagram = self.diagram();
+		#[cfg(not(feature = "diagram"))]
+		let diagram = quote!();
+
 		quote! {
 		  #(#doc_attrs)*
-		  // #diagram
+		  #diagram
 		  #visibility mod #fsm_name {
 			#(#use_statements)*
 
 			#(#type_attrs)*
 			pub struct Impl;
 
-			pub type StateMachine = ::rust_fsm::StateMachine<Impl>;
+			pub type StateMachine = ::nxt_fsm::StateMachine<Impl>;
 
 			#input_impl
 			#state_impl
 			#output_impl
 
-			impl ::rust_fsm::StateMachineImpl for Impl {
+
+			impl ::nxt_fsm::StateMachineImpl for Impl {
 				type Input<'__input_lifetime> = #input_type;
 				type State = #state_type;
 				type Output = #output_type;
@@ -174,5 +180,30 @@ impl ToTokens for StateMachineDef {
 			}
 		  }
 		}.to_tokens(tokens);
+	}
+}
+
+#[cfg(feature = "diagram")]
+impl StateMachineDef {
+	fn diagram(&self) -> TokenStream {
+		let mut diagram = String::with_capacity(2048);
+
+		// Headers & initial state
+		diagram.push_str("///```mermaid\n");
+		diagram.push_str("///stateDiagram-v2\n");
+		diagram.push_str(&format!("///    [*] --> {}\n", self.initial_state));
+
+		// Transitions
+		self.states.iter().flat_map(&StateDef::diagram).for_each(|line| diagram.push_str(&line));
+
+		// Close mermaid
+		diagram.push_str("///```");
+
+		// Generate code as comment
+		let diagram: TokenStream = diagram.parse().expect("Mermaid diagram is invalid");
+		quote! {
+			#[cfg_attr(doc, ::nxt_fsm::aquamarine)]
+			#diagram
+		}
 	}
 }

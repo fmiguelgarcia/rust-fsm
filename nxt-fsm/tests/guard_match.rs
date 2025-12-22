@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use rust_fsm::*;
+use nxt_fsm::*;
 use test_helpers::state_machine_proc;
 
 mod user_system_tests {

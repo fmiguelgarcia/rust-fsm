@@ -23,6 +23,11 @@ impl StateDef {
 
 		Self { state, transitions }
 	}
+
+	#[cfg(feature = "diagram")]
+	pub fn diagram(&self) -> Vec<String> {
+		self.transitions.iter().flat_map(Transition::diagram).collect()
+	}
 }
 impl ToTokens for StateDef {
 	fn to_tokens(&self, tokens: &mut TokenStream) {

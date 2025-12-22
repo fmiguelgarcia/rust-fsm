@@ -1,5 +1,5 @@
 /// Test for tuple variant input support in the state_machine! macro
-use rust_fsm::*;
+use nxt_fsm::*;
 
 state_machine! {
 	turnstile(Locked)

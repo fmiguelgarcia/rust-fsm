@@ -1,11 +1,11 @@
 mod test_helpers;
 
+use nxt_fsm::*;
 use payment_system::{
 	Input::{self, Complete, Fail, Retry, StartPayment},
 	Output::{self, InsufficientAmount},
 	State, StateMachine,
 };
-use rust_fsm::*;
 use test_case::test_case;
 use test_helpers::state_machine_proc;
 

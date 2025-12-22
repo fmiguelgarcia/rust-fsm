@@ -3,7 +3,7 @@ use crate::traffic_light::{
 	Output, State, StateMachine,
 };
 
-use rust_fsm::*;
+use nxt_fsm::*;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use test_case::test_case;
 

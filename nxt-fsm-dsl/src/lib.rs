@@ -22,8 +22,8 @@ use quote::{format_ident, quote};
 use std::collections::BTreeSet;
 use syn::{parse_macro_input, Ident};
 
-// #[cfg(feature = "diagram")]
-// mod diagram;
+#[cfg(feature = "diagram")]
+mod diagram;
 
 #[proc_macro]
 /// Produce a state machine definition from the provided `rust-fmt` DSL

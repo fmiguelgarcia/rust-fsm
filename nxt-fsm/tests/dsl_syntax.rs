@@ -1,4 +1,4 @@
-use rust_fsm::*;
+use nxt_fsm::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static COUNT: AtomicU32 = AtomicU32::new(0);
